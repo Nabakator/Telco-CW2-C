@@ -6,6 +6,9 @@
 \usepackage{enumitem}
 \usepackage{hyperref}
 \usepackage{titlesec}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{amsmath}
 
 % Compact section spacing
 \titlespacing*{\section}{0pt}{0.6em}{0.3em}
@@ -17,47 +20,201 @@
 
 \begin{center}
     {\LARGE \textbf{ENG4200 Coursework 2 – Group Report}}\\[0.5em]
-    \textbf{Group ID:} \underline{\hspace{3cm}} \\[0.5em]
+    \textbf{Group ID:} Telco-CW2-C{\hspace{3cm}} \\[0.5em]
     Group Members (Name + ID): 
     \begin{itemize}
-        \item Member 1
-        \item Member 2
-        \item Member 3
+        \item Ayush Bhandge (3148137B)
+        \item Prathamesh Deepak Bagal (3154253B)
+        \item Karthik Mandigiri (3155271M)
+        \item Nathan Sidi Bakari (3071212S)
+        \item Zefu Wang (3136524W)
+        \item Jiangyue Yao Zhao (3084311Z)
     \end{itemize}
-    Dataset: \underline{\hspace{6cm}}
+    Dataset: Telco Customer Churn{\hspace{6cm}}
 \end{center}
 
 \vspace{1em}
 
 %---------------------------------------
 \section*{1. Objective \& Dataset (5--6 sentences)}
-Briefly state the prediction task, dataset used, and what your group aimed to investigate.  
+
+The goal of this coursework is to design and critically evaluate supervised learning pipelines for predicting customer churn on the Telco Customer Churn dataset, formulated as a binary classification problem. Following the general machine-learning workflow (problem understanding, data preparation, model selection, evaluation, and deployment), we emphasise experiment design and justification rather than raw benchmark accuracy. The input space contains a mixture of numerical features (e.g.\ tenure, both monthly and total charges) and high-cardinality categorical variables (e.g.\ contract type, payment method), with moderate class imbalance (approximately $26.5\%$ churners). This structure motivates careful preprocessing and an evaluation strategy that explicitly addresses imbalance and overfitting. In line with the coursework brief, we compare several models from the supervised learning part of the course (logistic regression, decision trees, support vector machines, random forests and gradient boosting) using a common experimental protocol based on stratified train–test splitting and cross-validation. Our analysis focuses on three axes: predictive performance (F1-score and ROC--AUC), computational efficiency (training and prediction time), and robustness to overfitting, leading to a cost-aware choice of a primary deployed model and an interpretable baseline.
 
 %---------------------------------------
 \section*{2. Pipeline Designs}
-Summarise the \textbf{2--3 pipelines tested}.  
-\begin{itemize}
-    \item Provide a table of models and preprocessing steps.
-    \item Add a single comparative flow diagram if useful.
-\end{itemize}
+
+All pipelines share the same high-level structure, consistent with the standard estimator–transformer API of scikit-learn:
+
+\begin{enumerate}[label=(\roman*)]
+    \item \textbf{Data cleaning:} string trimming and coercion of \texttt{TotalCharges} to numeric; collapsing ``No internet service'' and ``No phone service'' into a single ``No'' level, to avoid spurious sparsity and simplify the feature space.
+    \item \textbf{Preprocessing:} a \emph{ColumnTransformer} with median imputation and standardisation for numerical features, and most-frequent imputation plus one-hot encoding for categorical features, using \texttt{drop="if\_binary"} to avoid redundant dummy variables.
+    \item \textbf{Classifier:} one of the course models, with hyperparameters tuned in the individual notebooks by grid search over theoretically motivated ranges.
+\end{enumerate}
+
+\vspace{0.5em}
+\noindent
+We implemented five pipelines, which can be grouped into three conceptual families (linear, non-linear single-tree, and ensemble/kernel methods). Table~\ref{tab:pipelines} summarises their key design choices and complexity controls.
+
+\begin{table}[h]
+    \centering
+    \small
+    \begin{tabular}{@{}p{2.7cm}p{3.2cm}p{4.2cm}p{4.2cm}@{}}
+        \toprule
+        \textbf{Pipeline} & \textbf{Base model} & \textbf{Key hyperparameters / complexity control} & \textbf{Theoretical motivation} \\
+        \midrule
+        Logistic Regression &
+        $\ell_2$-regularised logistic regression &
+        $C = 0.01$, penalty = $\ell_2$, solver SAGA, class\_weight = balanced &
+        Linear decision boundary with probabilistic outputs; the $\ell_2$ penalty controls $\lVert w \rVert_2$ and hence variance, implementing regularisation that trades a small increase in bias for a substantial reduction in overfitting risk. \\
+        \midrule
+        Decision Tree &
+        CART decision tree classifier &
+        Max depth $=3$, min samples split $=2$, min samples leaf $=1$, class\_weight = balanced &
+        Non-linear, axis-aligned splits chosen greedily to maximise impurity reduction (Gini). Restricting depth acts as structural regularisation, limiting the size of the tree and therefore its variance. \\
+        \midrule
+        SVM (RBF kernel) &
+        Soft-margin SVM with RBF kernel &
+        $C=0.1$, $\gamma=\text{scale}$, class\_weight = balanced, probability = True &
+        Maximises the geometric margin in feature space while allowing slack variables. The RBF kernel implements a flexible non-linear mapping; the pair $(C,\gamma)$ controls capacity: small $C$ and moderate $\gamma$ encourage a wider margin and better generalisation. \\
+        \midrule
+        Random Forest &
+        Random Forest classifier (bagging of trees) &
+        $n\_{\text{estimators}}=200$, max depth $=12$, min samples split $=20$, min samples leaf $=1$, max features = log2, class\_weight = balanced &
+        Bagging aggregates many de-correlated trees, reducing variance by averaging. Bootstrap sampling and random feature subsampling reduce correlation between trees, approximating the classical $1/M$ variance reduction of independent estimators while retaining low bias. \\
+        \midrule
+        Gradient Boosting &
+        GradientBoosting classifier (additive trees) &
+        $n\_{\text{estimators}}=200$, learning rate $=0.05$, max depth $=2$, subsample $=0.8$ &
+        Boosting builds an additive model of shallow trees fitted to the negative gradients of the loss. Low depth and shrinkage (learning rate) regularise the ensemble, implementing a bias–variance trade-off controlled by the learning rate and number of stages. \\
+        \bottomrule
+    \end{tabular}
+    \caption{Summary of pipelines: all share the same cleaning and preprocessing, differing only in the final estimator and its complexity control.}
+    \label{tab:pipelines}
+\end{table}
+
+\noindent
+Figure~\ref{fig:pipeline-diagram} can be used in the presentation as a single comparative flow diagram illustrating the common data-to-prediction pathway.
+
+\begin{center}
+    % Placeholder: export a schematic from the notebook or draw in PowerPoint
+    \fbox{\parbox{0.8\textwidth}{\centering [Pipeline diagram: \emph{Raw data} $\rightarrow$ Cleaning $\rightarrow$ ColumnTransformer (numeric \& categorical branches) $\rightarrow$ Classifier (LR / DT / SVM / RF / GB)]}}
+\end{center}
+
+\begin{figure}[h]
+    \centering
+    \includegraphics[width=0.75\textwidth]{pipeline-diagram-placeholder.png}
+    \caption{Placeholder for the shared preprocessing + model selection pipeline.}
+    \label{fig:pipeline-diagram}
+\end{figure}
 
 %---------------------------------------
 \section*{3. Comparative Analysis}
-Present one table/figure comparing \textbf{accuracy, efficiency, and overfitting}.  
-\begin{center}
+
+We follow the model-evaluation rules from the course: a single stratified 80/20 train–test split, with all hyperparameter tuning and cross-validation performed exclusively on the training set. Within the training set, we use 5-fold stratified cross-validation with shuffled splits to obtain reliable estimates of generalisation performance and overfitting gaps. Because churners form the minority class and the business cost of false negatives is high, we focus on the F1-score as the primary metric, complemented by accuracy and ROC--AUC. F1 directly reflects the harmonic mean of precision and recall, thus penalising models that either miss too many churners (low recall) or raise too many false alarms (low precision), while ROC--AUC captures ranking quality in a threshold-independent way.
+
+\vspace{0.4em}
+\noindent
+Table~\ref{tab:cv-results} reports cross-validated performance on the training set, while Table~\ref{tab:test-benchmark} summarises the final benchmark on the held-out test set together with training and prediction times.
+
+\begin{table}[h]
+    \centering
+    \small
+    \begin{tabular}{@{}lcccc@{}}
+        \toprule
+        \textbf{Model} & \textbf{F1 (CV mean)} & \textbf{F1 (CV std)} & \textbf{ROC--AUC (CV mean)} & \textbf{Overfitting gap (F1)} \\
+        \midrule
+        Random Forest      & 0.640 & 0.013 & 0.845 & $\approx 0.04$ \\
+        Logistic Regression & 0.632 & 0.011 & 0.843 & $\approx 0.01$ \\
+        SVM (RBF)          & 0.623 & 0.013 & 0.840 & $\approx 0.02$ \\
+        Decision Tree      & 0.619 & 0.015 & 0.816 & $\approx 0.05$ \\
+        Gradient Boosting  & 0.593 & 0.016 & 0.850 & $\approx 0.03$ \\
+        \bottomrule
+    \end{tabular}
+    \caption{Cross-validated performance (5-fold CV on the training set). Overfitting gap denotes mean(train F1) minus mean(validation F1).}
+    \label{tab:cv-results}
+\end{table}
+
+\begin{table}[h]
+    \centering
+    \small
+    \begin{tabular}{@{}lcccccc@{}}
+        \toprule
+        \textbf{Model} & \textbf{Train [s]} & \textbf{Predict [s]} & \textbf{Accuracy} & \textbf{F1} & \textbf{ROC--AUC} \\
+        \midrule
+        Random Forest      & 0.27 & 0.03 & 0.767 & 0.630 & 0.845 \\
+        Decision Tree      & 0.04 & 0.01 & 0.746 & 0.621 & 0.816 \\
+        Logistic Regression & 0.06 & 0.01 & 0.743 & 0.619 & 0.838 \\
+        SVM (RBF)          & 3.99 & 0.27 & 0.791 & 0.614 & 0.835 \\
+        Gradient Boosting  & 0.69 & 0.01 & 0.799 & 0.571 & 0.846 \\
+        \bottomrule
+    \end{tabular}
+    \caption{Benchmark on the held-out test set (threshold $0.5$ for all probability-based models). Training and prediction times are wall-clock seconds on the same machine.}
+    \label{tab:test-benchmark}
+\end{table}
+
+\vspace{0.4em}
+\noindent
+To satisfy the coursework requirement of analysing accuracy, efficiency and overfitting in a single view, we also produced the following summary figures:
+
+\begin{itemize}
+    \item \textbf{[Insert figure: F1 vs.\ training time scatter plot].} Each point corresponds to one model; the efficient frontier in this plane comprises only the Decision Tree and Random Forest, as they are not dominated in both F1 and training cost.
+    \item \textbf{[Insert figure: ROC--AUC vs.\ training time scatter plot].} This highlights that Gradient Boosting achieves the highest ROC--AUC but with markedly lower F1, indicating that its ranking ability is high but its default $0.5$ threshold under-utilises recall on the minority class.
+    \item \textbf{[Insert figure: bar chart of cross-validated overfitting gaps].} This visualises the fact that the single Decision Tree has the largest train–validation F1 gap, consistent with its high variance, whereas Logistic Regression displays almost no gap, in line with its high bias and strong regularisation.
+\end{itemize}
+
+Overall, Random Forest dominates in F1 on both cross-validation and test sets, with competitive ROC--AUC and modest computational cost. Logistic Regression provides a well-calibrated linear baseline; SVM and Gradient Boosting offer strong ROC--AUC but either incur a substantial training cost (SVM) or sacrifice F1 (Gradient Boosting); and the shallow Decision Tree is fast but clearly less stable, as predicted by the bias–variance analysis of high-variance single trees versus ensembles.
+
+\begin{figure}[h]
+    % This placeholder can be replaced by a single composite figure exported from the notebook.
+    \centering
     \includegraphics[width=0.75\textwidth]{comparison-placeholder.png}
-\end{center}
+    \caption{Placeholder for the table/figure comparing \textbf{accuracy, efficiency, and overfitting}.}
+    \label{fig:comparison}
+\end{figure}
 
 %---------------------------------------
 \section*{4. Chosen Pipeline}
-Justify in 3–5 bullet points which pipeline performed best and why.  
+
+We selected the \textbf{Random Forest pipeline} as the primary model for deployment, with the Decision Tree pipeline retained as an interpretable reference. The choice is grounded both in empirical evidence and in the theoretical properties discussed in the course:
+
+\begin{itemize}
+    \item \textbf{Best trade-off between F1 and cost.} On the held-out test set the Random Forest achieves the highest F1-score (0.630) while remaining on the efficient frontier: its training time ($\approx 0.27$\,s) is only marginally higher than that of the simple Decision Tree, yet its F1 improves by roughly $0.9$ percentage points and its ROC--AUC is significantly higher (0.845 vs.\ 0.816). From a cost-sensitive perspective where false negatives are expensive, this gain in F1 is worth the negligible additional training cost.
+    \item \textbf{Robust generalisation via bagging.} Bagging theory shows that averaging $M$ decorrelated models reduces variance approximately by a factor $1/M$ (or, more generally, to $\sigma^2(\rho + (1-\rho)/M)$ when predictions have correlation $\rho$), without increasing bias when base learners share the same bias. Our Random Forest, built from 200 trees with bootstrap sampling and random feature selection, empirically exhibits lower train–test gaps than the single tree, confirming the expected variance reduction.
+    \item \textbf{Non-linear decision boundaries without manual feature engineering.} Decision trees and their ensembles partition the feature space into axis-aligned hyper-rectangles and thus can approximate complex, heterogeneous decision surfaces that a linear model cannot capture. In the churn context, this allows the model to capture interactions such as ``short tenure \emph{and} month-to-month contract \emph{and} fibre optic'' without explicit cross-features.
+    \item \textbf{Diagnostics support the choice.} The Random Forest confusion matrix shows a favourable balance between recall and precision on churners; its ROC and precision–recall curves present a smooth, high-performing trade-off across thresholds; and its learning curve displays converging training and validation F1, indicating that adding more data would yield diminishing returns and that the model is not grossly underfitting.
+    \item \textbf{Interpretability via feature importances.} Although less transparent than the Decision Tree, the Random Forest still admits global interpretation through impurity-based feature importances, which rank contract type, tenure, total and monthly charges, fibre-optic internet and electronic cheque as key drivers (consistent with domain intuition and hence increasing trust in the model).
+\end{itemize}
+
+The Decision Tree pipeline remains valuable as a human-readable baseline: its shallow depth makes it suitable for communicating rules to business stakeholders, even if its variance and lower ROC--AUC render it less attractive as the primary automated decision-maker.
 
 %---------------------------------------
 \section*{5. Team Reflection}
-Each member adds 1–2 sentences about their contribution or a key insight they gained.  
+
+\noindent
+Each team member briefly summarises their contribution and a key insight gained from the project.
+
+\begin{itemize}
+    \item \textbf{A. Bhandge:} [1–2 sentences on contributions, e.g.\ implementation of the Random Forest and Gradient Boosting pipelines, and insight gained about bias–variance trade-offs and ensemble methods.]
+    \item \textbf{P. D. Bagal:} [1–2 sentences on contributions, e.g.\ development of the logistic regression and SVM pipelines, and learning about the effect of regularisation and kernel parameters on margin and generalisation.]
+    \item \textbf{K. Mandigiri:} [1–2 sentences on contributions, e.g.\ data cleaning, EDA and construction of the unified Jupyter notebook, and insight into the importance of a disciplined evaluation protocol (train/validation/test separation, metric choice).]
+    \item \textbf{N. Sidi Bakari:} [1–2 sentences on contributions, e.g.\ implementation of the Random Forest and Gradient Boosting pipelines, and insight gained about bias–variance trade-offs and ensemble methods.]
+    \item \textbf{Z. Wang:} [1–2 sentences on contributions, e.g.\ development of the logistic regression and SVM pipelines, and learning about the effect of regularisation and kernel parameters on margin and generalisation.]
+    \item \textbf{J. Y. Zhao:} [1–2 sentences on contributions, e.g.\ data cleaning, EDA and construction of the unified Jupyter notebook, and insight into the importance of a disciplined evaluation protocol (train/validation/test separation, metric choice).]
+\end{itemize}
 
 %---------------------------------------
 \section*{Appendix (optional, max 1 page)}
-Extra comparative figures if required.  
+
+The following additional figures, not all included in the main body due to space constraints, further support our analysis and are available in the accompanying notebook:
+
+\begin{itemize}
+    \item \textbf{[EDA plots: tenure, MonthlyCharges, contract type].} Histograms and bar plots illustrating key marginal distributions and the class imbalance.
+    \item \textbf{[F1 vs.\ training time and ROC--AUC vs.\ training time scatter plots].} Used to construct the efficient frontier and identify dominated models.
+    \item \textbf{[Learning curve for the Random Forest].} Showing training and validation F1 as a function of training-set size, supporting the claim of moderate variance and limited underfitting.
+    \item \textbf{[Random Forest ROC and precision--recall curves].} Visualising the trade-off between recall and precision across thresholds.
+    \item \textbf{[Top-15 feature importance bar chart].} Summarising the most influential features in the Random Forest ensemble.
+\end{itemize}
+
+These figures, together with the reproducible Jupyter notebook, ensure that the experimental process is transparent and that all claims in the report can be independently verified.
 
 \end{document}
